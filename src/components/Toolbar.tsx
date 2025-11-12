@@ -12,6 +12,7 @@ import {
 
 const modeDefinitions: Array<{ id: GridMode; label: string; shortcut: string }> = [
   { id: 'draw', label: 'Draw', shortcut: 'B' },
+  { id: 'paint', label: 'Paint', shortcut: 'P' },
   { id: 'erase', label: 'Erase', shortcut: 'E' },
   { id: 'fill', label: 'Fill', shortcut: 'F' },
   { id: 'fillForward', label: 'Fill ↘', shortcut: 'G' },
@@ -125,6 +126,11 @@ const Toolbar = () => {
           setMode('draw');
           event.preventDefault();
           break;
+        case 'p':
+        case 'P':
+          setMode('paint');
+          event.preventDefault();
+          break;
         case 'e':
         case 'E':
           setMode('erase');
@@ -194,7 +200,7 @@ const Toolbar = () => {
           <button
             key={modeOption.id}
             type="button"
-            className={clsx('toolbar-button', {
+            className={clsx('toolbar-button', `mode-${modeOption.id}`, {
               active: mode === modeOption.id
             })}
             aria-pressed={mode === modeOption.id}
