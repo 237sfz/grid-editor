@@ -1,6 +1,14 @@
 import { ChangeEvent, useEffect, useRef } from 'react';
 import clsx from 'clsx';
-import { GridMode, useGridMode, useGridStore, useGridZoom } from '../state/gridStore';
+import {
+  GRID_SIZE_LIMITS,
+  GridMode,
+  useGridMode,
+  useGridSize,
+  useGridStore,
+  useGridZoom,
+  useSelectedColor
+} from '../state/gridStore';
 
 const modeDefinitions: Array<{ id: GridMode; label: string; shortcut: string }> = [
   { id: 'draw', label: 'Draw', shortcut: 'B' },
@@ -9,9 +17,13 @@ const modeDefinitions: Array<{ id: GridMode; label: string; shortcut: string }> 
   { id: 'pan', label: 'Pan', shortcut: 'Space' }
 ];
 
+const QUICK_PALETTE = ['#0ea5e9', '#a855f7', '#f97316', '#f43f5e', '#22c55e', '#facc15'];
+
 const Toolbar = () => {
   const mode = useGridMode();
   const zoom = useGridZoom();
+  const { selectedColor, setSelectedColor } = useSelectedColor();
+  const { rows, cols, setGridSize } = useGridSize();
   const {
     setMode,
     undo,
@@ -31,6 +43,8 @@ const Toolbar = () => {
   }));
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const temporaryModeRef = useRef<GridMode | null>(null);
+
+  const quickPalette = QUICK_PALETTE;
 
   const handleImport = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -61,6 +75,22 @@ const Toolbar = () => {
   const openFilePicker = () => {
     fileInputRef.current?.click();
   };
+
+  const handleSelectedColorChange = (event: ChangeEvent<HTMLInputElement>) => {
+    if (!event.target.value) return;
+    setSelectedColor(event.target.value);
+  };
+
+  const handleGridSizeInput = (dimension: 'rows' | 'cols') =>
+    (event: ChangeEvent<HTMLInputElement>) => {
+      const nextValue = Number.parseInt(event.target.value, 10);
+      if (Number.isNaN(nextValue)) return;
+      if (dimension === 'rows') {
+        setGridSize(nextValue, cols);
+      } else {
+        setGridSize(rows, nextValue);
+      }
+    };
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -168,6 +198,46 @@ const Toolbar = () => {
             <span className="shortcut">{modeOption.shortcut}</span>
           </button>
         ))}
+      </div>
+      <div className="toolbar-section color-picker">
+        <div className="color-picker-group" role="group" aria-label="Color presets">
+          {quickPalette.map((color) => (
+            <button
+              key={color}
+              type="button"
+              className={clsx('color-swatch', { selected: selectedColor === color })}
+              style={{ backgroundColor: color }}
+              onClick={() => setSelectedColor(color)}
+              aria-label={`Select ${color}`}
+            />
+          ))}
+        </div>
+        <label className="color-input">
+          <span>Color</span>
+          <input type="color" value={selectedColor} onChange={handleSelectedColorChange} />
+        </label>
+      </div>
+      <div className="toolbar-section size-controls" role="group" aria-label="Grid size">
+        <label className="size-input">
+          <span>Rows</span>
+          <input
+            type="number"
+            min={GRID_SIZE_LIMITS.min}
+            max={GRID_SIZE_LIMITS.max}
+            value={rows}
+            onChange={handleGridSizeInput('rows')}
+          />
+        </label>
+        <label className="size-input">
+          <span>Cols</span>
+          <input
+            type="number"
+            min={GRID_SIZE_LIMITS.min}
+            max={GRID_SIZE_LIMITS.max}
+            value={cols}
+            onChange={handleGridSizeInput('cols')}
+          />
+        </label>
       </div>
       <div className="toolbar-section">
         <button type="button" className="toolbar-button" onClick={undo}>

@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useGridData, useGridStore, useGridZoom } from '../state/gridStore';
+import {
+  useGridData,
+  useGridMode,
+  useGridPan,
+  useGridStore,
+  useGridZoom
+} from '../state/gridStore';
 
 const BASE_CELL_SIZE = 24;
 
@@ -7,8 +13,14 @@ const GridCanvas = () => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const { grid, rows, cols } = useGridData();
   const zoom = useGridZoom();
+  const mode = useGridMode();
   const applyCellAction = useGridStore((state) => state.applyCellAction);
+  const { panX, panY, setPan } = useGridPan();
   const [isDrawing, setIsDrawing] = useState(false);
+  const [isPanning, setIsPanning] = useState(false);
+  const panOriginRef = useRef<{ x: number; y: number; panX: number; panY: number } | null>(
+    null
+  );
 
   const drawGrid = useCallback(() => {
     const canvas = canvasRef.current;
@@ -30,10 +42,11 @@ const GridCanvas = () => {
 
     const cellSize = BASE_CELL_SIZE * zoom;
 
-    context.fillStyle = '#0ea5e9';
     for (let r = 0; r < rows; r += 1) {
       for (let c = 0; c < cols; c += 1) {
-        if (grid[r][c] === 1) {
+        const cellColor = grid[r][c];
+        if (cellColor) {
+          context.fillStyle = cellColor;
           context.fillRect(c * cellSize, r * cellSize, cellSize, cellSize);
         }
       }
@@ -93,35 +106,73 @@ const GridCanvas = () => {
   const handlePointerDown = (event: React.PointerEvent<HTMLCanvasElement>) => {
     if (event.button !== 0) return;
     event.preventDefault();
-    setIsDrawing(true);
-    event.currentTarget.setPointerCapture(event.pointerId);
-    handlePointerAction(event);
+    if (mode === 'pan') {
+      setIsPanning(true);
+      panOriginRef.current = {
+        x: event.clientX,
+        y: event.clientY,
+        panX,
+        panY
+      };
+      event.currentTarget.setPointerCapture(event.pointerId);
+    } else {
+      setIsDrawing(true);
+      event.currentTarget.setPointerCapture(event.pointerId);
+      handlePointerAction(event);
+    }
   };
 
   const handlePointerMove = (event: React.PointerEvent<HTMLCanvasElement>) => {
+    if (isPanning) {
+      event.preventDefault();
+      const origin = panOriginRef.current;
+      if (!origin) return;
+      const deltaX = event.clientX - origin.x;
+      const deltaY = event.clientY - origin.y;
+      setPan(origin.panX + deltaX, origin.panY + deltaY);
+      return;
+    }
+
     if (!isDrawing) return;
     event.preventDefault();
     handlePointerAction(event);
   };
 
   const stopDrawing = (event: React.PointerEvent<HTMLCanvasElement>) => {
-    if (!isDrawing) return;
-    event.preventDefault();
-    setIsDrawing(false);
+    if (isPanning || isDrawing) {
+      event.preventDefault();
+    }
+
+    if (isPanning) {
+      setIsPanning(false);
+      panOriginRef.current = null;
+      setPan(panX, panY, true);
+    }
+
+    if (isDrawing) {
+      setIsDrawing(false);
+    }
+
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
   };
+
+  const cursor = mode === 'pan' ? (isPanning ? 'grabbing' : 'grab') : 'crosshair';
 
   return (
     <div className="grid-canvas-wrapper">
       <canvas
         ref={canvasRef}
         className="grid-canvas"
+        style={{ transform: `translate(${panX}px, ${panY}px)`, cursor }}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={stopDrawing}
         onPointerLeave={stopDrawing}
+        onPointerCancel={stopDrawing}
+        data-mode={mode}
+        data-active={isPanning ? 'panning' : isDrawing ? 'drawing' : 'idle'}
       />
     </div>
   );

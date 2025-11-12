@@ -1,6 +1,6 @@
 # Grid Editor
 
-A browser-based grid editor built with React and Vite. The editor supports drawing, erasing, and filling cells, undo/redo history, zoom controls, and JSON import/export so you can continue where you left off.
+A browser-based grid editor built with React and Vite. The editor supports drawing, erasing, and filling cells with color choices, undo/redo history, zoom controls, grid resizing, drag-to-pan navigation, and JSON import/export so you can continue where you left off.
 
 ## Prerequisites
 
@@ -39,9 +39,10 @@ The compiled assets are output to the `dist/` directory and can be deployed to a
 ## Features & shortcuts
 
 - Draw/Erase/Fill tools with keyboard shortcuts (`B`, `E`, `F`).
-- Hold the space bar to temporarily switch to Pan mode.
+- Hold the space bar to temporarily switch to Pan mode and drag the canvas instead of relying on scrollbars.
 - Undo/Redo (`Ctrl/Cmd+Z`, `Shift+Ctrl/Cmd+Z`).
 - Zoom with toolbar buttons or keyboard (`+`, `-`, `0`).
+- Choose colors from quick presets or a color picker and resize the grid dimensions at any time.
 - Import/Export grid data as JSON for sharing or backup.
 - Automatic persistence in `localStorage` between sessions.
 
@@ -73,9 +74,12 @@ The editor serializes grid data as JSON with the following shape:
 {
   "rows": 32,
   "cols": 32,
-  "grid": [[0, 1, 0, ...], ...],
-  "zoom": 1
+  "grid": [[null, "#0ea5e9", null, ...], ...],
+  "zoom": 1,
+  "selectedColor": "#0ea5e9",
+  "panX": 0,
+  "panY": 0
 }
 ```
 
-You can import compatible JSON files to continue editing an existing layout.
+You can import compatible JSON files to continue editing an existing layout. Missing optional fields fall back to sensible defaults.
