@@ -4,6 +4,17 @@ export type GridMode = 'draw' | 'erase' | 'fill' | 'fillForward' | 'paint' | 'pa
 
 export type CellValue = string | null;
 
+export type PaintPoint = {
+  x: number;
+  y: number;
+};
+
+export type PaintStroke = {
+  color: string;
+  width: number;
+  points: PaintPoint[];
+};
+
 export interface PersistedGridState {
   rows: number;
   cols: number;
@@ -12,16 +23,26 @@ export interface PersistedGridState {
   selectedColor: string;
   panX: number;
   panY: number;
+  paintStrokes: PaintStroke[];
+}
+
+interface StateSnapshot {
+  grid: CellValue[][];
+  paintStrokes: PaintStroke[];
 }
 
 interface GridStore extends PersistedGridState {
   mode: GridMode;
-  history: CellValue[][][];
-  future: CellValue[][][];
+  history: StateSnapshot[];
+  future: StateSnapshot[];
+  activeStrokeIndex: number | null;
   setMode: (mode: GridMode) => void;
   setZoom: (zoom: number) => void;
   bumpZoom: (delta: number) => void;
   applyCellAction: (row: number, col: number) => void;
+  startPaintStroke: (point: PaintPoint) => void;
+  updatePaintStroke: (point: PaintPoint) => void;
+  endPaintStroke: () => void;
   undo: () => void;
   redo: () => void;
   clear: () => void;
@@ -42,11 +63,19 @@ const MIN_GRID_SIZE = 8;
 const MAX_GRID_SIZE = 128;
 const STORAGE_KEY = 'grid-editor-state';
 const DEFAULT_COLOR = '#0ea5e9';
+const DEFAULT_STROKE_WIDTH = 2;
 
 const createEmptyGrid = (rows: number, cols: number): CellValue[][] =>
   Array.from({ length: rows }, () => Array.from({ length: cols }, () => null));
 
 const cloneGrid = (grid: CellValue[][]) => grid.map((row) => [...row]);
+
+const clonePaintStrokes = (strokes: PaintStroke[]) =>
+  strokes.map((stroke) => ({
+    color: stroke.color,
+    width: stroke.width,
+    points: stroke.points.map((point) => ({ ...point }))
+  }));
 
 const clamp = (value: number, min: number, max: number) =>
   Math.min(Math.max(value, min), max);
@@ -81,6 +110,43 @@ const normalizeGrid = (rawGrid: unknown, rows: number, cols: number): CellValue[
   return normalized;
 };
 
+const normalizePaintPoint = (point: unknown): PaintPoint | null => {
+  if (!point || typeof point !== 'object') return null;
+  const maybePoint = point as Record<string, unknown>;
+  const x = maybePoint.x;
+  const y = maybePoint.y;
+  if (typeof x !== 'number' || typeof y !== 'number') return null;
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+  return { x, y };
+};
+
+const normalizePaintStrokes = (raw: unknown): PaintStroke[] => {
+  if (!Array.isArray(raw)) return [];
+  const normalized: PaintStroke[] = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== 'object') continue;
+    const stroke = entry as Record<string, unknown>;
+    const pointsRaw = stroke.points;
+    if (!Array.isArray(pointsRaw)) continue;
+    const points: PaintPoint[] = [];
+    for (const point of pointsRaw) {
+      const normalizedPoint = normalizePaintPoint(point);
+      if (normalizedPoint) {
+        points.push(normalizedPoint);
+      }
+    }
+    if (points.length === 0) continue;
+    const width = stroke.width;
+    const color = stroke.color;
+    normalized.push({
+      color: typeof color === 'string' ? color : DEFAULT_COLOR,
+      width: typeof width === 'number' && Number.isFinite(width) && width > 0 ? width : DEFAULT_STROKE_WIDTH,
+      points
+    });
+  }
+  return normalized;
+};
+
 const persistSnapshot = (state: PersistedGridState) => {
   if (typeof window === 'undefined') return;
   try {
@@ -110,7 +176,8 @@ const readSnapshot = (): PersistedGridState | null => {
         selectedColor:
           typeof parsed.selectedColor === 'string' ? parsed.selectedColor : DEFAULT_COLOR,
         panX: typeof parsed.panX === 'number' ? parsed.panX : 0,
-        panY: typeof parsed.panY === 'number' ? parsed.panY : 0
+        panY: typeof parsed.panY === 'number' ? parsed.panY : 0,
+        paintStrokes: normalizePaintStrokes(parsed.paintStrokes)
       };
     }
   } catch (error) {
@@ -119,8 +186,11 @@ const readSnapshot = (): PersistedGridState | null => {
   return null;
 };
 
-const pushHistory = (state: GridStore): CellValue[][][] => {
-  const snapshot = cloneGrid(state.grid);
+const pushHistory = (state: GridStore): StateSnapshot[] => {
+  const snapshot: StateSnapshot = {
+    grid: cloneGrid(state.grid),
+    paintStrokes: clonePaintStrokes(state.paintStrokes)
+  };
   const history = [...state.history, snapshot];
   if (history.length > MAX_HISTORY) history.shift();
   return history;
@@ -186,7 +256,8 @@ const buildPersistedState = (
   zoom: overrides.zoom ?? state.zoom,
   selectedColor: overrides.selectedColor ?? state.selectedColor,
   panX: overrides.panX ?? state.panX,
-  panY: overrides.panY ?? state.panY
+  panY: overrides.panY ?? state.panY,
+  paintStrokes: overrides.paintStrokes ?? state.paintStrokes
 });
 
 export const useGridStore = create<GridStore>((set, get) => ({
@@ -198,8 +269,10 @@ export const useGridStore = create<GridStore>((set, get) => ({
   panX: 0,
   panY: 0,
   mode: 'draw',
+  paintStrokes: [],
   history: [],
   future: [],
+  activeStrokeIndex: null,
   setMode: (mode) => set({ mode }),
   setZoom: (zoom) =>
     set((state) => {
@@ -220,7 +293,6 @@ export const useGridStore = create<GridStore>((set, get) => ({
       let nextGrid: CellValue[][] | null = null;
       switch (state.mode) {
         case 'draw':
-        case 'paint':
           if (state.grid[row][col] !== state.selectedColor) {
             nextGrid = cloneGrid(state.grid);
             nextGrid[row][col] = state.selectedColor;
@@ -258,42 +330,113 @@ export const useGridStore = create<GridStore>((set, get) => ({
       return {
         grid: nextGrid,
         history,
-        future: []
+        future: [],
+        activeStrokeIndex: null
       };
+    }),
+  startPaintStroke: (point) =>
+    set((state) => {
+      if (state.activeStrokeIndex !== null) {
+        return {};
+      }
+      const history = pushHistory(state);
+      const newStroke: PaintStroke = {
+        color: state.selectedColor,
+        width: DEFAULT_STROKE_WIDTH,
+        points: [point]
+      };
+      const paintStrokes = [...state.paintStrokes, newStroke];
+      return {
+        paintStrokes,
+        history,
+        future: [],
+        activeStrokeIndex: paintStrokes.length - 1
+      };
+    }),
+  updatePaintStroke: (point) =>
+    set((state) => {
+      if (state.activeStrokeIndex === null) {
+        return {};
+      }
+      const index = state.activeStrokeIndex;
+      const target = state.paintStrokes[index];
+      if (!target) {
+        return { activeStrokeIndex: null };
+      }
+      const lastPoint = target.points[target.points.length - 1];
+      if (lastPoint && lastPoint.x === point.x && lastPoint.y === point.y) {
+        return {};
+      }
+      const updatedStroke: PaintStroke = {
+        ...target,
+        points: [...target.points, point]
+      };
+      const paintStrokes = state.paintStrokes.map((stroke, idx) =>
+        idx === index ? updatedStroke : stroke
+      );
+      return { paintStrokes };
+    }),
+  endPaintStroke: () =>
+    set((state) => {
+      if (state.activeStrokeIndex === null) {
+        return {};
+      }
+      persistSnapshot(buildPersistedState(state, { paintStrokes: state.paintStrokes }));
+      return { activeStrokeIndex: null };
     }),
   undo: () =>
     set((state) => {
       if (state.history.length === 0) return {};
       const history = [...state.history];
       const previous = history.pop()!;
-      const future = [cloneGrid(state.grid), ...state.future];
-      persistSnapshot(buildPersistedState(state, { grid: previous }));
+      const previousGrid = cloneGrid(previous.grid);
+      const previousStrokes = clonePaintStrokes(previous.paintStrokes);
+      const futureSnapshot: StateSnapshot = {
+        grid: cloneGrid(state.grid),
+        paintStrokes: clonePaintStrokes(state.paintStrokes)
+      };
+      const future = [futureSnapshot, ...state.future];
+      persistSnapshot(
+        buildPersistedState(state, { grid: previousGrid, paintStrokes: previousStrokes })
+      );
       return {
-        grid: previous,
+        grid: previousGrid,
+        paintStrokes: previousStrokes,
         history,
-        future
+        future,
+        activeStrokeIndex: null
       };
     }),
   redo: () =>
     set((state) => {
       if (state.future.length === 0) return {};
       const [next, ...rest] = state.future;
-      const history = [...state.history, cloneGrid(state.grid)];
-      persistSnapshot(buildPersistedState(state, { grid: next }));
+      const nextGrid = cloneGrid(next.grid);
+      const nextStrokes = clonePaintStrokes(next.paintStrokes);
+      const historySnapshot: StateSnapshot = {
+        grid: cloneGrid(state.grid),
+        paintStrokes: clonePaintStrokes(state.paintStrokes)
+      };
+      const history = [...state.history, historySnapshot];
+      persistSnapshot(buildPersistedState(state, { grid: nextGrid, paintStrokes: nextStrokes }));
       return {
-        grid: next,
+        grid: nextGrid,
+        paintStrokes: nextStrokes,
         history,
-        future: rest
+        future: rest,
+        activeStrokeIndex: null
       };
     }),
   clear: () =>
     set((state) => {
       const cleared = createEmptyGrid(state.rows, state.cols);
-      persistSnapshot(buildPersistedState(state, { grid: cleared }));
+      persistSnapshot(buildPersistedState(state, { grid: cleared, paintStrokes: [] }));
       return {
         grid: cleared,
+        paintStrokes: [],
         history: [],
-        future: []
+        future: [],
+        activeStrokeIndex: null
       };
     }),
   setSelectedColor: (color) =>
@@ -321,17 +464,20 @@ export const useGridStore = create<GridStore>((set, get) => ({
           cols: nextCols,
           grid: resized,
           panX: 0,
-          panY: 0
+          panY: 0,
+          paintStrokes: []
         })
       );
       return {
         rows: nextRows,
         cols: nextCols,
         grid: resized,
+        paintStrokes: [],
         history: [],
         future: [],
         panX: 0,
-        panY: 0
+        panY: 0,
+        activeStrokeIndex: null
       };
     }),
   setPan: (x, y, persist = false) =>
@@ -356,7 +502,8 @@ export const useGridStore = create<GridStore>((set, get) => ({
       zoom: state.zoom,
       selectedColor: state.selectedColor,
       panX: state.panX,
-      panY: state.panY
+      panY: state.panY,
+      paintStrokes: state.paintStrokes
     });
   },
   deserialize: (payload: string) => {
@@ -376,6 +523,7 @@ export const useGridStore = create<GridStore>((set, get) => ({
         const nextPanY = typeof parsed.panY === 'number' ? parsed.panY : 0;
         const nextZoom =
           typeof parsed.zoom === 'number' ? clamp(parsed.zoom, MIN_ZOOM, MAX_ZOOM) : 1;
+        const nextPaintStrokes = normalizePaintStrokes(parsed.paintStrokes);
         set({
           rows: nextRows,
           cols: nextCols,
@@ -384,8 +532,10 @@ export const useGridStore = create<GridStore>((set, get) => ({
           selectedColor: nextColor,
           panX: nextPanX,
           panY: nextPanY,
+          paintStrokes: nextPaintStrokes,
           history: [],
-          future: []
+          future: [],
+          activeStrokeIndex: null
         });
         persistSnapshot({
           rows: nextRows,
@@ -394,7 +544,8 @@ export const useGridStore = create<GridStore>((set, get) => ({
           zoom: nextZoom,
           selectedColor: nextColor,
           panX: nextPanX,
-          panY: nextPanY
+          panY: nextPanY,
+          paintStrokes: nextPaintStrokes
         });
       }
     } catch (error) {
@@ -415,8 +566,10 @@ export const useGridStore = create<GridStore>((set, get) => ({
       selectedColor: stored.selectedColor,
       panX: stored.panX,
       panY: stored.panY,
+      paintStrokes: normalizePaintStrokes(stored.paintStrokes),
       history: [],
-      future: []
+      future: [],
+      activeStrokeIndex: null
     });
   }
 }));
@@ -445,6 +598,15 @@ export const useGridPan = () =>
     panX: state.panX,
     panY: state.panY,
     setPan: state.setPan
+  }));
+
+export const usePaintLayer = () =>
+  useGridStore((state) => ({
+    paintStrokes: state.paintStrokes,
+    startPaintStroke: state.startPaintStroke,
+    updatePaintStroke: state.updatePaintStroke,
+    endPaintStroke: state.endPaintStroke,
+    activeStrokeIndex: state.activeStrokeIndex
   }));
 
 export const GRID_SIZE_LIMITS = {
