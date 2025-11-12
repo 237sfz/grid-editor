@@ -14,6 +14,7 @@ const modeDefinitions: Array<{ id: GridMode; label: string; shortcut: string }> 
   { id: 'draw', label: 'Draw', shortcut: 'B' },
   { id: 'erase', label: 'Erase', shortcut: 'E' },
   { id: 'fill', label: 'Fill', shortcut: 'F' },
+  { id: 'fillForward', label: 'Fill ↘', shortcut: 'G' },
   { id: 'pan', label: 'Pan', shortcut: 'Space' }
 ];
 
@@ -132,6 +133,11 @@ const Toolbar = () => {
         case 'f':
         case 'F':
           setMode('fill');
+          event.preventDefault();
+          break;
+        case 'g':
+        case 'G':
+          setMode('fillForward');
           event.preventDefault();
           break;
         case ' ':
