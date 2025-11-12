@@ -130,6 +130,18 @@ body {
   background: rgba(15, 23, 42, 0.95);
   touch-action: none;
   will-change: transform;
+  position: relative;
+  z-index: 1;
+}
+
+.paint-canvas {
+  position: absolute;
+  inset: 0;
+  background: transparent;
+  touch-action: none;
+  will-change: transform;
+  z-index: 2;
+  pointer-events: none;
 }
 
 .color-picker {
