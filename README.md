@@ -39,6 +39,7 @@ The compiled assets are output to the `dist/` directory and can be deployed to a
 ## Features & shortcuts
 
 - Draw/Erase/Fill tools with keyboard shortcuts (`B`, `E`, `F`).
+- Directional Fill tool that only spreads to the right or downward (`G`).
 - Hold the space bar to temporarily switch to Pan mode and drag the canvas instead of relying on scrollbars.
 - Undo/Redo (`Ctrl/Cmd+Z`, `Shift+Ctrl/Cmd+Z`).
 - Zoom with toolbar buttons or keyboard (`+`, `-`, `0`).

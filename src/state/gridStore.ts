@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 
-export type GridMode = 'draw' | 'erase' | 'fill' | 'pan';
+export type GridMode = 'draw' | 'erase' | 'fill' | 'fillForward' | 'pan';
 
 export type CellValue = string | null;
 
@@ -126,7 +126,15 @@ const pushHistory = (state: GridStore): CellValue[][][] => {
   return history;
 };
 
-const floodFill = (grid: CellValue[][], row: number, col: number, newValue: CellValue) => {
+type Direction = [number, number];
+
+const floodFillWithDirections = (
+  grid: CellValue[][],
+  row: number,
+  col: number,
+  newValue: CellValue,
+  directions: Direction[]
+) => {
   const targetValue = grid[row]?.[col];
   if (targetValue === undefined || targetValue === newValue) {
     return grid;
@@ -139,13 +147,34 @@ const floodFill = (grid: CellValue[][], row: number, col: number, newValue: Cell
     const [r, c] = stack.pop()!;
     if (filled[r]?.[c] !== targetValue) continue;
     filled[r][c] = newValue;
-    if (r > 0) stack.push([r - 1, c]);
-    if (r + 1 < rows) stack.push([r + 1, c]);
-    if (c > 0) stack.push([r, c - 1]);
-    if (c + 1 < cols) stack.push([r, c + 1]);
+    for (const [dr, dc] of directions) {
+      const nextRow = r + dr;
+      const nextCol = c + dc;
+      if (nextRow < 0 || nextCol < 0 || nextRow >= rows || nextCol >= cols) {
+        continue;
+      }
+      if (filled[nextRow]?.[nextCol] !== targetValue) {
+        continue;
+      }
+      stack.push([nextRow, nextCol]);
+    }
   }
   return filled;
 };
+
+const floodFill = (grid: CellValue[][], row: number, col: number, newValue: CellValue) =>
+  floodFillWithDirections(grid, row, col, newValue, [
+    [-1, 0],
+    [1, 0],
+    [0, -1],
+    [0, 1]
+  ]);
+
+const forwardFill = (grid: CellValue[][], row: number, col: number, newValue: CellValue) =>
+  floodFillWithDirections(grid, row, col, newValue, [
+    [1, 0],
+    [0, 1]
+  ]);
 
 const buildPersistedState = (
   state: GridStore,
@@ -205,6 +234,11 @@ export const useGridStore = create<GridStore>((set, get) => ({
         case 'fill':
           if (state.grid[row][col] !== state.selectedColor) {
             nextGrid = floodFill(state.grid, row, col, state.selectedColor);
+          }
+          break;
+        case 'fillForward':
+          if (state.grid[row][col] !== state.selectedColor) {
+            nextGrid = forwardFill(state.grid, row, col, state.selectedColor);
           }
           break;
         case 'pan':
