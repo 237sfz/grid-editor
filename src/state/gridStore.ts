@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 
-export type GridMode = 'draw' | 'erase' | 'fill' | 'fillForward' | 'pan';
+export type GridMode = 'draw' | 'erase' | 'fill' | 'fillForward' | 'paint' | 'pan';
 
 export type CellValue = string | null;
 
@@ -220,6 +220,7 @@ export const useGridStore = create<GridStore>((set, get) => ({
       let nextGrid: CellValue[][] | null = null;
       switch (state.mode) {
         case 'draw':
+        case 'paint':
           if (state.grid[row][col] !== state.selectedColor) {
             nextGrid = cloneGrid(state.grid);
             nextGrid[row][col] = state.selectedColor;
