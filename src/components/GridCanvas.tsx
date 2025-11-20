@@ -11,6 +11,7 @@ import {
 const BASE_CELL_SIZE = 24;
 
 const GridCanvas = () => {
+  const wrapperRef = useRef<HTMLDivElement | null>(null);
   const gridCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const paintCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const { grid, rows, cols } = useGridData();
@@ -22,6 +23,7 @@ const GridCanvas = () => {
   const [isDrawing, setIsDrawing] = useState(false);
   const [isPanning, setIsPanning] = useState(false);
   const [isPainting, setIsPainting] = useState(false);
+  const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 });
   const panOriginRef = useRef<{ x: number; y: number; panX: number; panY: number } | null>(
     null
   );
@@ -117,6 +119,61 @@ const GridCanvas = () => {
     drawLayers();
   }, [drawLayers]);
 
+  useEffect(() => {
+    const updateViewport = () => {
+      const wrapper = wrapperRef.current;
+      if (!wrapper) return;
+      const rect = wrapper.getBoundingClientRect();
+      setViewportSize({ width: rect.width, height: rect.height });
+    };
+
+    updateViewport();
+
+    let resizeObserver: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== 'undefined') {
+      resizeObserver = new ResizeObserver(updateViewport);
+      if (wrapperRef.current) {
+        resizeObserver.observe(wrapperRef.current);
+      }
+    }
+
+    window.addEventListener('resize', updateViewport);
+    return () => {
+      window.removeEventListener('resize', updateViewport);
+      if (resizeObserver) {
+        resizeObserver.disconnect();
+      }
+    };
+  }, []);
+
+  const clampPan = useCallback(
+    (x: number, y: number) => {
+      const contentWidth = cols * BASE_CELL_SIZE * zoom;
+      const contentHeight = rows * BASE_CELL_SIZE * zoom;
+      const viewWidth = viewportSize.width || contentWidth;
+      const viewHeight = viewportSize.height || contentHeight;
+      const boundedViewWidth = Math.min(viewWidth, contentWidth);
+      const boundedViewHeight = Math.min(viewHeight, contentHeight);
+      const minVisible = 48; // keep at least a small strip visible so the canvas never leaves view
+      const minX = minVisible - contentWidth;
+      const maxX = boundedViewWidth - minVisible;
+      const minY = minVisible - contentHeight;
+      const maxY = boundedViewHeight - minVisible;
+      return {
+        x: Math.min(Math.max(x, minX), maxX),
+        y: Math.min(Math.max(y, minY), maxY)
+      };
+    },
+    [cols, rows, viewportSize.height, viewportSize.width, zoom]
+  );
+
+  useEffect(() => {
+    const clamped = clampPan(panX, panY);
+    if (clamped.x !== panX || clamped.y !== panY) {
+      setPan(clamped.x, clamped.y);
+    }
+  }, [clampPan, panX, panY, setPan]);
+
   const getCellFromEvent = useCallback(
     (event: PointerEvent | React.PointerEvent<HTMLCanvasElement>) => {
       const canvas = gridCanvasRef.current;
@@ -194,7 +251,8 @@ const GridCanvas = () => {
       if (!origin) return;
       const deltaX = event.clientX - origin.x;
       const deltaY = event.clientY - origin.y;
-      setPan(origin.panX + deltaX, origin.panY + deltaY);
+      const clamped = clampPan(origin.panX + deltaX, origin.panY + deltaY);
+      setPan(clamped.x, clamped.y);
       return;
     }
 
@@ -211,7 +269,8 @@ const GridCanvas = () => {
     if (isPanning) {
       setIsPanning(false);
       panOriginRef.current = null;
-      setPan(panX, panY, true);
+      const clamped = clampPan(panX, panY);
+      setPan(clamped.x, clamped.y, true);
     }
 
     if (isDrawing) {
@@ -273,11 +332,15 @@ const GridCanvas = () => {
   const gridPointerEvents: 'auto' | 'none' = mode === 'paint' ? 'none' : 'auto';
 
   return (
-    <div className="grid-canvas-wrapper">
+    <div ref={wrapperRef} className="grid-canvas-wrapper">
       <canvas
         ref={gridCanvasRef}
         className="grid-canvas"
-        style={{ transform: `translate(${panX}px, ${panY}px)`, cursor, pointerEvents: gridPointerEvents }}
+        style={{
+          transform: `translate(${panX}px, ${panY}px)`,
+          cursor,
+          pointerEvents: gridPointerEvents
+        }}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={stopDrawing}
